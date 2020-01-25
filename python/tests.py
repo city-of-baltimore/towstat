@@ -17,7 +17,7 @@ def fixture_towingdata():
     """
     Setup for each test
     """
-    yield towing.TowingData()
+    return towing.TowingData()
 
 
 def test_get_all_vehicles(towingdata):

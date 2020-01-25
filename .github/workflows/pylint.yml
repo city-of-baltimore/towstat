@@ -12,9 +12,9 @@ jobs:
           pylint python
       - name: Test with pytest
         run: |
-          pip install -U pytest
+          pip install -U pytest -r requirements.txt
           pytest python/tests.py
       - name: Look for security issues with Bandit
         run: |
-          pip install -U bandit
+          pip install -U bandit -r requirements.txt
           bandit python
