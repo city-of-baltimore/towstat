@@ -32,29 +32,25 @@ TOW_CATEGORIES = {
     1000: 'nocode'
 }
 
+
 class TowingData:
     """
     Manages towing database, data processing, and writing files
     """
     def __init__(self):
-        conn = pyodbc.connect('Driver={SQL Server};' #pylint:disable=c-extension-no-member
-                              'Server=DOT-FS04-SRV\DOT_FS04;' #pylint:disable=anomalous-backslash-in-string
-                              'Database=IVIC;'
-                              'Trusted_Connection=yes;')
+        conn = pyodbc.connect(r"Driver={SQL Server};"  # pylint:disable=c-extension-no-member
+                              r"Server=DOT-FS04-SRV\DOT_FS04;"
+                              r"Database=IVIC;"
+                              r"Trusted_Connection=yes;")
 
         self.cursor = conn.cursor()
 
-        app_num = lambda x: "{}_num".format(x) #pylint:disable=unnecessary-lambda
-        app_age = lambda x: "{}_age".format(x) #pylint:disable=unnecessary-lambda
-
-        data_categories = [f(x) for x in TOW_CATEGORIES.values() for f in (app_num, app_age)]
+        data_categories = [f(x) for x in TOW_CATEGORIES.values() for f in (self._app_num, self._app_age)]
 
         DataAccumulator = namedlist('DataAccumulator', data_categories, default=0)
 
         # Uses the form of datetime: DataAccumulator
-        self.date_hash = defaultdict(lambda: DataAccumulator()) #pylint:disable=unnecessary-lambda
-
-
+        self.date_hash = defaultdict(lambda: DataAccumulator())
 
     def get_all_vehicles(self):
         """
@@ -162,7 +158,7 @@ class TowingData:
                 with FileLock(filename, timeout=0):
                     break
             except Timeout:
-                i = i + 1 if i != "" else 0 # when the file is still open, lets just write it elsewhere
+                i = i + 1 if i != "" else 0  # when the file is still open, lets just write it elsewhere
             except FileNotFoundError:
                 break
         return filename
@@ -252,10 +248,8 @@ class TowingData:
         logging.info("write_towing")
         if len(self.date_hash) == 0:
             self.calculate_vehicle_stats()
-        app_num = lambda x: "{}_num".format(x) #pylint:disable=unnecessary-lambda
-        app_avg = lambda x: "{}_avg".format(x) #pylint:disable=unnecessary-lambda
 
-        csv_columns = ['datetime'] + [f(x) for x in TOW_CATEGORIES.values() for f in (app_num, app_avg)]
+        csv_columns = ['datetime'] + [f(x) for x in TOW_CATEGORIES.values() for f in (self._app_num, self._app_avg)]
         csv_file = self._get_valid_filename(filename)
         with open(csv_file, 'w') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
@@ -267,7 +261,7 @@ class TowingData:
                     if col == 'datetime':
                         row['datetime'] = date
                     elif '_avg' in col:
-                        temp_col = col.replace('_avg', '') # get base category name
+                        temp_col = col.replace('_avg', '')  # get base category name
                         vdays = getattr(data_acc, '{}_age'.format(temp_col))
                         vnum = getattr(data_acc, '{}_num'.format(temp_col))
                         row[col] = (vdays / vnum) if vnum > 0 else 0
@@ -336,6 +330,22 @@ class TowingData:
                                  'Release_Date_Time': row[5]
                                  })
 
+    @staticmethod
+    def _app_num(field):
+        """Helper for generating dynamic field names"""
+        return "{}_num".format(field)
+
+    @staticmethod
+    def _app_age(field):
+        """Helper for generating dynamic field names"""
+        return "{}_age".format(field)
+
+    @staticmethod
+    def _app_avg(field):
+        """Helper for generating dynamic field names"""
+        return "{}_avg".format(field)
+
+
 def main():
     """
     Main function
@@ -359,6 +369,7 @@ def main():
         towdata.write_pickups()
     if args.oldest or runall:
         towdata.write_oldest_vehicles()
+
 
 if __name__ == '__main__':
     main()

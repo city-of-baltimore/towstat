@@ -1,4 +1,5 @@
 # pylint: skip-file
+# flake8: noqa
 #######################################################################
 # namedlist is similar to collections.namedtuple, but supports default
 #  values and is writable.  Also contains an implementation of
