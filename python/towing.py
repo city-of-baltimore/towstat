@@ -11,9 +11,9 @@ import re
 
 from collections import Counter, defaultdict
 from filelock import FileLock, Timeout
-from namedlist import namedlist
-
 import pyodbc
+
+from namedlist import namedlist
 
 logging.basicConfig(
         format='%(asctime)s %(levelname)-8s %(message)s',
