@@ -50,7 +50,7 @@ class TowingData:
         DataAccumulator = namedlist('DataAccumulator', data_categories, default=0)
 
         # Uses the form of datetime: DataAccumulator
-        self.date_hash = defaultdict(lambda: DataAccumulator())
+        self.date_hash = defaultdict(lambda: DataAccumulator())  # pylint:disable=unnecessary-lambda
 
     def get_all_vehicles(self):
         """
