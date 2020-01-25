@@ -1,3 +1,4 @@
+# pylint: skip-file
 #######################################################################
 # namedlist is similar to collections.namedtuple, but supports default
 #  values and is writable.  Also contains an implementation of

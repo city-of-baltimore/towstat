@@ -1,8 +1,12 @@
+"""
+Tests for towing
+"""
 from datetime import datetime, date, timedelta
 import csv
 import os
 import tempfile
 import unittest
+from filelock import FileLock
 
 import towing
 
@@ -11,25 +15,38 @@ class TestTowingData(unittest.TestCase):
     Unit tests for towing.TowingData
     """
     def setUp(self):
+        """
+        Setup for each test
+        """
         self.towingdata = towing.TowingData()
 
     def test_get_all_vehicles(self):
+        """
+        Tests that we get a reasonable number of results from get_all_vehicles
+        """
         vehicles = self.towingdata.get_all_vehicles()
         self.assertGreater(len(vehicles), 400000)
 
     def test_get_receive_date(self):
+        """
+        Tests a few known receive dates
+        """
         self.assertEqual(self.towingdata.get_receive_date('P538997'), date(1998, 8, 26))
         self.assertEqual(self.towingdata.get_receive_date('P473548'), date(2002, 6, 24))
         self.assertEqual(self.towingdata.get_receive_date('P311487'), date(2016, 1, 30))
 
     def test_get_release_date(self):
+        """
+        Tests a few known release dates
+        """
         self.assertEqual(self.towingdata.get_release_date('P288581'), date(2014, 12, 19))
         self.assertEqual(self.towingdata.get_release_date('P240453'), date(2014, 12, 10))
         self.assertEqual(self.towingdata.get_release_date('P364054'), date(1899, 12, 31))
 
-    def test_get_pickup_types(self):
-        pickup_types = self.towingdata.get_pickup_types()
-
+    def test_get_pickup_types_valid_data(self):
+        """
+        Tests that we don't get invalid pickup codes
+        """
         # Validate that the codes we get back are valid
         verification_pickup_types = ['', '111', '111B', '111N', '112', '111A', '111P', '112D', '112P', '113', '111S',
                                      '112H', '113C', '111D', '140', '200', '125', 'REL', '200P', '111V', '200B', 'RAVE',
@@ -39,6 +56,10 @@ class TestTowingData(unittest.TestCase):
                             "Failed on {} not in {}.".format(pickup_type, verification_pickup_types))
             verification_pickup_types.remove(pickup_type)
 
+    def test_write_pickups(self):
+        """
+        Tests that write pickups will write a proper CSV file, and validates some data
+        """
         test_data = [('111', 100), ('200', 88), ('', 13), ('Bad', 99)]
         validation_data = {'police_action': ['111', '100'],
                            'stolen_recovered': ['200', '88'],
@@ -55,6 +76,10 @@ class TestTowingData(unittest.TestCase):
         self.assertGreater(os.stat(path).st_size, 100)
 
     def test_get_oldest_vehicles(self):
+        """
+        Tests that get_oldest_vehicles will return the proper number of rows, that they are sufficiently old, and that
+        the output file is reasonably sized
+        """
         vehicles = self.towingdata.get_oldest_vehicles(100)
         self.assertEqual(len(vehicles), 100)
 
@@ -71,30 +96,37 @@ class TestTowingData(unittest.TestCase):
         self.assertGreater(os.stat(path).st_size, 1200)
 
     def test_is_date_zero(self):
-        self.assertTrue(self.towingdata._is_date_zero(date(1899, 12, 31)))
-        self.assertFalse(self.towingdata._is_date_zero(date(1990, 12, 31)))
-        self.assertFalse(self.towingdata._is_date_zero(date(2020, 1, 31)))
+        """
+        Tests that _is_date_zero can tell us if a date is SQL Server zero
+        """
+        self.assertTrue(self.towingdata._is_date_zero(date(1899, 12, 31))) #pylint:disable=protected-access
+        self.assertFalse(self.towingdata._is_date_zero(date(1990, 12, 31))) #pylint:disable=protected-access
+        self.assertFalse(self.towingdata._is_date_zero(date(2020, 1, 31))) #pylint:disable=protected-access
 
     def test_get_valid_filename(self):
-        import tempfile
-        tf = tempfile.mkstemp('.csv')[1]
-        self.assertEqual(self.towingdata._get_valid_filename(tf), tf)
+        """
+        Tests that _get_valid_filename will return a valid filename when a file is open, and will fail gracefully
+        """
+        tf_csv = tempfile.mkstemp('.csv')[1]
+        self.assertEqual(self.towingdata._get_valid_filename(tf_csv), tf_csv) #pylint:disable=protected-access
 
-        from filelock import FileLock
-        with FileLock(tf):
-            tfsplit = tf.split('.')
-            self.assertEqual(self.towingdata._get_valid_filename(tf), "{}0.{}".format('.'.join(tfsplit[0:-1]),
-                                                                                      tfsplit[-1]))
+        with FileLock(tf_csv):
+            tfsplit = tf_csv.split('.')
+            self.assertEqual(self.towingdata._get_valid_filename(tf_csv), #pylint:disable=protected-access
+                             "{}0.{}".format('.'.join(tfsplit[0:-1]), tfsplit[-1]))
 
-        self.assertEqual(self.towingdata._get_valid_filename(tf), tf)
+        self.assertEqual(self.towingdata._get_valid_filename(tf_csv), tf_csv) #pylint:disable=protected-access
 
     def test_process_events(self):
+        """
+        Tests that process_events will generate the proper output, given a known output
+        """
         def daterange(start_date, end_date):
             """
             Helper for iterating over a date range
             """
-            for n in range(int ((end_date - start_date).days + 1)):
-                yield start_date + timedelta(n)
+            for i in range(int((end_date - start_date).days + 1)):
+                yield start_date + timedelta(i)
 
         validation_data = {
             date(2019, 7, 28): (1, 1),
@@ -116,6 +148,7 @@ class TestTowingData(unittest.TestCase):
             date(2019, 8, 13): (1, 17)
         }
 
+        #pylint:disable=protected-access
         # We populate both the police_action vehicles and the impound with the same data to verify that one does not
         # impact the other, and then we validate that the total values are properly effected.
         self.towingdata._process_events(date(2019, 7, 28), date.today(), '140')
@@ -138,6 +171,7 @@ class TestTowingData(unittest.TestCase):
         self.towingdata._process_events(date(2019, 8, 5), date(2019, 8, 8), 'XX')
         self.towingdata._process_events(date(2019, 8, 2), date(2019, 8, 8), 'XX')
         self.towingdata._process_events(date(2019, 7, 29), date(2019, 8, 5), 'XX')
+        #pylint:enable=protected-access
 
         delta = (date.today() - date(2019, 7, 28)).days + 1
         self.assertEqual(len(self.towingdata.date_hash), delta)
@@ -153,6 +187,9 @@ class TestTowingData(unittest.TestCase):
             self.assertEqual(self.towingdata.date_hash[i].total_age, validation_data[i][1] * 4)
 
     def test_calculate_vehicle_stats(self):
+        """
+        Tests that calculate_vehicle_stats will generate proper known data, and verifies the output CSV
+        """
         #Property_Number, Receiving_Date_Time, Release_Date_Time, Pickup_Code, Pickup_Code_Change_Date, Orig_Pickup_Code
         test_data = [
             # The codes with a letter get collapsed into their main code
