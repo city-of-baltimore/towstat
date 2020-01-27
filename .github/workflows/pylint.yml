@@ -10,10 +10,10 @@ jobs:
         run: |
           pip install -U pylint -r requirements.txt
           pylint python
-      - name: Test with pytest
-        run: |
-          pip install -U pytest -r requirements.txt
-          pytest python/tests.py
+      - name: Lint with flake8
+        run : |
+          pip install -U flake8 -r requirements.txt
+          flake8 python
       - name: Look for security issues with Bandit
         run: |
           pip install -U bandit -r requirements.txt
