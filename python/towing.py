@@ -26,7 +26,7 @@ POLICE_HOLD = ['111B', '111M', '111N', '111P', '111S']
 TOW_CATEGORIES = {
     0: 'total',
     111: 'police_action',
-    1111: 'police_hold', # not a code; its how we differentiate police_action vs police_hold since we strip subcodes
+    1111: 'police_hold',  # not a code; its how we differentiate police_action vs police_hold since we strip subcodes
     112: 'accident',
     113: 'abandoned',
     125: 'scofflaw',
