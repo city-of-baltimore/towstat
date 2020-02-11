@@ -14,8 +14,8 @@ datemin <- as.Date(towingdata[which.min(as.POSIXct(towingdata$datetime)), ]$date
 # Prepare data from the categories file
 pickupdata <- read.csv('pickups.csv')
 
-# Prepare data from the top 15 file
-top15data <- read.csv('top_15.csv')
+# Prepare data from the oldest vehicle file
+top15data <- read.csv('oldest.csv')
 
 ui <- fluidPage(
   # This line loads the Google Charts JS library
@@ -42,19 +42,20 @@ ui <- fluidPage(
     max = max(towingdata$number) + 5
   ),
 
-  
+
 
   tabsetPanel(
     tabPanel(
       "TowStat",
       sidebarPanel(
         checkboxGroupInput(
-          "vehiclequantity", 
-          h3("Quantity of Vehicles"), 
+          "vehiclequantitycb",
+          h3("Quantity of Vehicles"),
           choices = list(
             "Overall" = "total_num",
-            "Police Action" = "police_action_num", 
-            "Accident" = "accident_num", 
+            "Police Action" = "police_action_num",
+            "Police Hold" = "police_hold_num",
+            "Accident" = "accident_num",
             "Abandoned" = "abandoned_num",
             "Scofflaw" = "scofflaw_num",
             "Impound" = "impound_num",
@@ -64,12 +65,13 @@ ui <- fluidPage(
           selected = "total_num"
         ),
         checkboxGroupInput(
-          "daysonlot", 
-          h3("Average days on lot"), 
+          "daysonlotcb",
+          h3("Average days on lot"),
           choices = list(
             "Overall" = "total_avg",
             "Police Action" = "police_action_avg",
-            "Accident" = "accident_avg", 
+            "Police Hold" = "police_hold_avg",
+            "Accident" = "accident_avg",
             "Abandoned" = "abandoned_avg",
             "Scofflaw" = "scofflaw_avg",
             "Impound" = "impound_avg",
@@ -84,10 +86,10 @@ ui <- fluidPage(
         fluidRow(
          sliderInput(
            "date", "Date",
-           min = datemin + 3650, 
+           min = datemin + 3650,
            max = datemax,
            value = c(datemax - 180,
-                     datemax), 
+                     datemax),
            animate = TRUE,
            width = '90%'
          )
@@ -102,18 +104,19 @@ ui <- fluidPage(
       "Categories",
       sidebarPanel(
         checkboxGroupInput(
-          "towcategoriescb", 
-          h3("Average days on lot"), 
+          "towcategoriescb",
+          h3("Average days on lot"),
           choices = list(
             "Police Action" = "111",
-            "Accident" = "112", 
+            "Police Hold" = "1111",
+            "Accident" = "112",
             "Abandoned" = "113",
             "Scofflaw" = "125",
             "Impound" = "140",
             "Stolen-Recovered" = "200",
             "No code" = "1000"
           ),
-          selected = c("111", "112", "113", "125", "140", "200")
+          selected = c("111", "1111", "112", "113", "125", "140", "200")
         ),
       ),
       mainPanel(
@@ -124,7 +127,7 @@ ui <- fluidPage(
     ),
     tabPanel(
       "Oldest vehicles",
-      h4("The oldest 15 cars on the lot"),
+      h4("The oldest cars on the lot"),
       DT::dataTableOutput("oldestvehicles")
     )
   )
@@ -135,35 +138,38 @@ server <- function(input, output) {
   # Vehicle quanity graph on the TowStat tab
   output$quantityview <- renderGvis({
     data <- reactive({
-      towingdata %>% 
-        select(c("datetime", input$vehiclequantity)) %>%
+      towingdata %>%
+        select(c("datetime", input$vehiclequantitycb)) %>%
         filter(as.Date(datetime) >= as.Date(input$date[1]) & as.Date(input$date[2]) >= as.Date(datetime))
     })
     gvisLineChart(
-      data(), 
-      xvar='datetime', 
-      yvar=input$vehiclequantity,
+      data(),
+      xvar='datetime',
+      yvar=input$vehiclequantitycb,
       options=list(
-        legend="{ position: 'bottom', maxLines: 3 }",
-        vAxes="[{title:'# of vehicles'}]", 
+        legend="{ position: 'right', maxLines: 3 }",
+        vAxes="[{title:'quantity'}]",
         width="100%",
         height=350
       )
     )
   })
-  
+
   # Vehicle age graph on the TowStat tab
   output$avgview <- renderGvis({
     data <- reactive({
-      towingdata %>% 
-        select(c("datetime", input$daysonlot)) %>%
+      towingdata %>%
+        select(c("datetime", input$daysonlotcb)) %>%
         filter(as.Date(datetime) >= as.Date(input$date[1]) & as.Date(input$date[2]) >= as.Date(datetime))
     })
     gvisLineChart(
-      data(), 
-      xvar='datetime', 
-      yvar=input$daysonlot,
+      data(),
+      xvar='datetime',
+      yvar=input$daysonlotcb,
       options=list(
+        legend="{ position: 'right', maxLines: 3 }",
+        vAxes="[{title:'avg age'}]",
+        width="100%",
         height=350
       )
     )
@@ -185,7 +191,7 @@ server <- function(input, output) {
       )
     )
   })
-  
+
   # DataTable of the oldest vehicles on the oldest vehicles tab
   output$oldestvehicles = DT::renderDataTable({
     top15data

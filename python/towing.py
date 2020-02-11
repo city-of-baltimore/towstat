@@ -20,9 +20,13 @@ logging.basicConfig(
         level=logging.INFO,
         datefmt='%Y-%m-%d %H:%M:%S')
 
+# These are police holds, as opposed to police action, which should be differentiated
+POLICE_HOLD = ['111B', '111M', '111N', '111P', '111S']
+
 TOW_CATEGORIES = {
     0: 'total',
     111: 'police_action',
+    1111: 'police_hold',  # not a code; its how we differentiate police_action vs police_hold since we strip subcodes
     112: 'accident',
     113: 'abandoned',
     125: 'scofflaw',
@@ -109,8 +113,14 @@ class TowingData:
         else:
             self.cursor.execute("SELECT Pickup_Code FROM Vehicle_Receiving")
 
+        def _process_code(code):
+            if code in POLICE_HOLD:
+                # store it this way to differentiate from 'police_action'
+                return 1111
+            return re.sub("[^0-9]", "", str(code))
+
         # Pull results out of row types
-        res = [re.sub("[^0-9]", "", str(i[0])) for i in self.cursor.fetchall()]
+        res = [_process_code(i[0]) for i in self.cursor.fetchall()]
 
         return zip(Counter(res).keys(), Counter(res).values())
 
@@ -128,7 +138,9 @@ class TowingData:
                             "FROM [Vehicle_Release] "
                             "JOIN Vehicle_Receiving "
                             "ON [Vehicle_Receiving].Property_Number = Vehicle_Release.Property_Number "
-                            "WHERE Release_Date_Time < '12/31/1900 12:00:00 AM'".format(int(num)))
+                            "WHERE Release_Date_Time < '12/31/1900 12:00:00 AM' AND "
+                            "Receiving_Date_Time > '12/31/1900 12:00:00 AM' "
+                            "ORDER BY Receiving_Date_Time".format(int(num)))
 
         return self.cursor.fetchall()
 
@@ -178,12 +190,15 @@ class TowingData:
         if not code:
             category = "nocode"
         else:
-            base_code = re.sub("[^0-9]", "", str(code))
-            if base_code and int(base_code) in TOW_CATEGORIES.keys():
-                category = TOW_CATEGORIES[int(base_code)]
+            if str(code) in POLICE_HOLD:
+                category = TOW_CATEGORIES[1111]
             else:
-                # this is garbage data we will use verbatim
-                category = "nocode"
+                base_code = re.sub("[^0-9]", "", str(code))
+                if base_code and int(base_code) in TOW_CATEGORIES.keys():
+                    category = TOW_CATEGORIES[int(base_code)]
+                else:
+                    # this is garbage data we will use verbatim
+                    category = "nocode"
 
         if self._is_date_zero(release_date):
             release_date = datetime.date.today()
@@ -232,6 +247,7 @@ class TowingData:
 
             logging.info(row[0])
             if not self._is_date_zero(row[4].date()):
+                # This means that the pickup code changed, so we should process this as two different date ranges
                 self._process_events(receive_date, row[4].date() - datetime.timedelta(days=1), row[5])
                 initial_age = (row[4].date() - receive_date).days
                 self._process_events(row[4].date(), release_date, row[3], initial_age)
@@ -303,7 +319,7 @@ class TowingData:
                                  'base_pickup_type': 1000,
                                  'quantity': nocode_num})
 
-    def write_oldest_vehicles(self, vehicles=None, filename="top_15.csv"):
+    def write_oldest_vehicles(self, vehicles=None, filename="oldest.csv"):
         """
         Writes the csv file with the 15 oldest vehicles on the lot
 
