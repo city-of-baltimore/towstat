@@ -23,6 +23,9 @@ logging.basicConfig(
 # These are police holds, as opposed to police action, which should be differentiated
 POLICE_HOLD = ['111B', '111M', '111N', '111P', '111S']
 
+# Vehicle types that are not full size vehicles
+DB_TYPES = ['DB', 'SCOT', 'ATV']
+
 TOW_CATEGORIES = {
     0: 'total',
     111: 'police_action',
@@ -49,7 +52,11 @@ class TowingData:
 
         self.cursor = conn.cursor()
 
-        data_categories = [f(x) for x in TOW_CATEGORIES.values() for f in (self._app_num, self._app_age)]
+        data_categories = []
+
+        for sublist in [f(x) for x in TOW_CATEGORIES.values() for f in (self._app_num, self._app_age)]:
+            for item in sublist:
+                data_categories.append(item)
 
         DataAccumulator = namedlist('DataAccumulator', data_categories, default=0)
 
@@ -63,11 +70,13 @@ class TowingData:
         :return: All rows from database with vehicle information
         """
         logging.info("Get_all_vehicles")
-        self.cursor.execute('SELECT Vehicle_Release.Property_Number, Receiving_Date_Time, Release_Date_Time, '
-                            'Pickup_Code, Pickup_Code_Change_Date, Original_Pickup_Code '
-                            'FROM [Vehicle_Release] '
-                            'JOIN Vehicle_Receiving '
-                            'ON [Vehicle_Receiving].Property_Number = Vehicle_Release.Property_Number')
+        self.cursor.execute("SELECT Vehicle_Release.Property_Number, Receiving_Date_Time, Release_Date_Time, "
+                            "Pickup_Code, Pickup_Code_Change_Date, Original_Pickup_Code, Property_Type "
+                            "FROM [Vehicle_Release] "
+                            "JOIN Vehicle_Receiving "
+                            "ON [Vehicle_Receiving].Property_Number = Vehicle_Release.Property_Number "
+                            "JOIN Vehicle_Identification "
+                            "ON [Vehicle_Receiving].Property_Number = Vehicle_Identification.Property_Number ")
         return self.cursor.fetchall()
 
     def get_receive_date(self, property_number):
@@ -96,20 +105,26 @@ class TowingData:
         assert len(res) <= 1
         return res[0][0].date()
 
-    def get_pickup_types(self, on_lot=True):
+    def get_pickup_types(self, on_lot=True, with_db=True):
         """
         Counts the number of vehicles on lot based on their receiving code
 
         :param on_lot: true if we should only look at current vehicles; false if we should look at all time vehicles
+        :param with_db: true if we should include dirt bikes and small vehicles in our query
         :return: dict of {pickupcode: quantity}
         """
         logging.info("get_pickup_types")
         if on_lot:
-            self.cursor.execute("SELECT Vehicle_Receiving.Pickup_Code, Release_Date_Time "
+            db_appd = ""
+            if not with_db:
+                db_appd = " AND Property_Type NOT IN ('{}')".format("', '".join(DB_TYPES))
+            self.cursor.execute("SELECT Vehicle_Receiving.Pickup_Code, Release_Date_Time, Property_Type "
                                 "FROM Vehicle_Receiving "
                                 "JOIN Vehicle_Release "
                                 "ON [Vehicle_Receiving].Property_Number = Vehicle_Release.Property_Number "
-                                "WHERE Release_Date_Time < '12/31/1900 12:00:00 AM'")
+                                "JOIN Vehicle_Identification "
+                                "ON [Vehicle_Receiving].Property_Number = Vehicle_Identification.Property_Number "
+                                "WHERE Release_Date_Time < '12/31/1900 12:00:00 AM'{}".format(db_appd))
         else:
             self.cursor.execute("SELECT Pickup_Code FROM Vehicle_Receiving")
 
@@ -122,7 +137,8 @@ class TowingData:
         # Pull results out of row types
         res = [_process_code(i[0]) for i in self.cursor.fetchall()]
 
-        return zip(Counter(res).keys(), Counter(res).values())
+        # This matches the codes with its frequency in a way that is easy to access
+        return {k: v for k, v in zip(Counter(res).keys(), Counter(res).values())}  # pylint:disable=unnecessary-comprehension
 
     def get_oldest_vehicles(self, num=15):
         """
@@ -134,10 +150,12 @@ class TowingData:
         """
         logging.info("get_oldest_vehicles")
         self.cursor.execute("SELECT TOP {} Vehicle_Release.Property_Number, Receiving_Date_Time, Original_Pickup_Code, "
-                            "Pickup_Code_Change_Date, Pickup_Code, Release_Date_Time "
+                            "Pickup_Code_Change_Date, Pickup_Code, Release_Date_Time, Property_Type "
                             "FROM [Vehicle_Release] "
                             "JOIN Vehicle_Receiving "
                             "ON [Vehicle_Receiving].Property_Number = Vehicle_Release.Property_Number "
+                            "JOIN Vehicle_Identification "
+                            "ON [Vehicle_Receiving].Property_Number = Vehicle_Identification.Property_Number "
                             "WHERE Release_Date_Time < '12/31/1900 12:00:00 AM' AND "
                             "Receiving_Date_Time > '12/31/1900 12:00:00 AM' "
                             "ORDER BY Receiving_Date_Time".format(int(num)))
@@ -175,24 +193,28 @@ class TowingData:
                 break
         return filename
 
-    def _process_events(self, receive_date, release_date, code, days_offset=0):
+    def _process_events(self, receive_date, release_date, code, vehicle_type, days_offset=0):  # pylint:disable=too-many-arguments
         """
         Increments the number and age of cars for the specified code between the two dates.
 
         :param receive_date: (Datetime.date) First date (inclusive) when the vehicle was on the lot
         :param release_date: (Datetime.date) End date (inclusive) when the vehicle was on the lot as that code
         :param code: (str) The tow code for the vehicle
+        :param vehicle_type: (str) The vehicle type from the vehicle_information table
         :param days_offset: (int) Number of days the vehicle was on the lot before this event. Useful if the vehicle
         moves from one codetype to another and we want to count the existing age of the vehicle
         :return: none
         """
         logging.debug("_process_events(%s, %s, %s, %s)", receive_date, release_date, code, days_offset)
         if not code:
+            # Handle empty codes
             category = "nocode"
         else:
             if str(code) in POLICE_HOLD:
+                # Treat this as a separate category
                 category = TOW_CATEGORIES[1111]
             else:
+                # Strip the letters off the end to merge everything into the major categories
                 base_code = re.sub("[^0-9]", "", str(code))
                 if base_code and int(base_code) in TOW_CATEGORIES.keys():
                     category = TOW_CATEGORIES[int(base_code)]
@@ -217,6 +239,15 @@ class TowingData:
                 age = "{}_age".format(category)
                 setattr(self.date_hash[key], age, getattr(self.date_hash[key], age) + i + days_offset + 1)
                 self.date_hash[key].total_age += i + days_offset + 1
+
+                if vehicle_type not in DB_TYPES:
+                    num = "{}_nondb_num".format(category)
+                    setattr(self.date_hash[key], num, getattr(self.date_hash[key], num) + 1)
+                    self.date_hash[key].total_nondb_num += 1
+
+                    age = "{}_nondb_age".format(category)
+                    setattr(self.date_hash[key], age, getattr(self.date_hash[key], age) + i + days_offset + 1)
+                    self.date_hash[key].total_nondb_age += i + days_offset + 1
 
     def calculate_vehicle_stats(self, vehicle_rows=None):
         """
@@ -248,13 +279,13 @@ class TowingData:
             logging.info(row[0])
             if not self._is_date_zero(row[4].date()):
                 # This means that the pickup code changed, so we should process this as two different date ranges
-                self._process_events(receive_date, row[4].date() - datetime.timedelta(days=1), row[5])
+                self._process_events(receive_date, row[4].date() - datetime.timedelta(days=1), row[5], row[6])
                 initial_age = (row[4].date() - receive_date).days
-                self._process_events(row[4].date(), release_date, row[3], initial_age)
+                self._process_events(row[4].date(), release_date, row[3], row[6], initial_age)
             else:
-                self._process_events(receive_date, release_date, row[3])
+                self._process_events(receive_date, release_date, row[3], row[6])
 
-    def write_towing(self, filename="towing.csv"):
+    def write_towing(self, filename, date_hash):
         """
         Writes the csv file with the date based age and quantity of cars
 
@@ -262,16 +293,21 @@ class TowingData:
         :return: none
         """
         logging.info("write_towing")
-        if len(self.date_hash) == 0:
+        if len(date_hash) == 0:
             self.calculate_vehicle_stats()
 
-        csv_columns = ['datetime'] + [f(x) for x in TOW_CATEGORIES.values() for f in (self._app_num, self._app_avg)]
-        csv_file = self._get_valid_filename(filename)
-        with open(csv_file, 'w') as csvfile:
+        csv_columns = ['datetime']
+
+        # Build the list of columns, taking each citation type, and splitting it into the _num/_avg and nondb types
+        for sublist in [f(x) for x in TOW_CATEGORIES.values() for f in (self._app_num, self._app_avg)]:
+            for item in sublist:  # break up the list of tuples into a list
+                csv_columns.append(item)
+
+        with open(self._get_valid_filename(filename), 'w') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
             writer.writeheader()
 
-            for date, data_acc in sorted(self.date_hash.items()):
+            for date, data_acc in sorted(date_hash.items()):
                 row = {}
                 for col in csv_columns:
                     if col == 'datetime':
@@ -285,39 +321,44 @@ class TowingData:
                         row[col] = getattr(data_acc, col)
                 writer.writerow(row)
 
-    def write_pickups(self, pickup_types=None, filename="pickups.csv"):
+    def write_pickups(self, filename="pickups.csv"):
         """
         Writes the csv file with the pickup types and the breakdown
 
-        :param pickup_types: A dictionary of pickup types and quantity, mainly for testing support
         :param filename: Filename to output into
         :return: none
         """
         logging.info("write_pickups")
-        if pickup_types is None:
-            pickup_types = self.get_pickup_types()
-        csv_columns = ['pickup_type', 'base_pickup_type', 'quantity']
+        pickup_types = self.get_pickup_types()
+        non_db_pickup_types = self.get_pickup_types(with_db=False)
+        csv_columns = ['pickup_type', 'base_pickup_type', 'with dirtbikes', 'without dirtbikes']
         csv_file = self._get_valid_filename(filename)
         with open(csv_file, 'w') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
             writer.writeheader()
             nocode_num = 0
-            for pickup_type, quantity in pickup_types:
+            nodb_nocode_num = 0
+            for pickup_type in pickup_types.keys():
                 if pickup_type == 1000:
-                    nocode_num += quantity
+                    nocode_num += pickup_types[pickup_type]
+                    nodb_nocode_num += non_db_pickup_types[pickup_type]
                     continue
                 try:
                     valid_pickup_type = TOW_CATEGORIES[int(pickup_type)]
                 except ValueError:
-                    nocode_num += quantity
+                    nocode_num += pickup_types[pickup_type]
+                    nodb_nocode_num += non_db_pickup_types[pickup_type]
+
                     continue
                 writer.writerow({'pickup_type': valid_pickup_type,
                                  'base_pickup_type': re.sub("[^0-9]", "", str(pickup_type)),
-                                 'quantity': int(quantity)})
+                                 'with dirtbikes': int(pickup_types[pickup_type]),
+                                 'without dirtbikes': non_db_pickup_types[pickup_type]})
             if nocode_num:
                 writer.writerow({'pickup_type': 'nocode',
                                  'base_pickup_type': 1000,
-                                 'quantity': nocode_num})
+                                 'with dirtbikes': nocode_num,
+                                 'without dirtbikes': nodb_nocode_num})
 
     def write_oldest_vehicles(self, vehicles=None, filename="oldest.csv"):
         """
@@ -332,7 +373,7 @@ class TowingData:
             vehicles = self.get_oldest_vehicles()
 
         csv_columns = ['Property_Number', 'Receiving_Date_Time', 'Original_Pickup_Code', 'Pickup_Code_Change_Date',
-                       'Pickup_Code', 'Release_Date_Time']
+                       'Pickup_Code', 'Release_Date_Time', 'Property_Type']
         csv_file = self._get_valid_filename(filename)
         with open(csv_file, 'w') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
@@ -343,23 +384,24 @@ class TowingData:
                                  'Original_Pickup_Code': row[2],
                                  'Pickup_Code_Change_Date': row[3],
                                  'Pickup_Code': row[4],
-                                 'Release_Date_Time': row[5]
+                                 'Release_Date_Time': row[5],
+                                 'Property_Type': row[6]
                                  })
 
     @staticmethod
     def _app_num(field):
         """Helper for generating dynamic field names"""
-        return "{}_num".format(field)
+        return "{}_num".format(field), "{}_nondb_num".format(field)
 
     @staticmethod
     def _app_age(field):
         """Helper for generating dynamic field names"""
-        return "{}_age".format(field)
+        return "{}_age".format(field), "{}_nondb_age".format(field)
 
     @staticmethod
     def _app_avg(field):
         """Helper for generating dynamic field names"""
-        return "{}_avg".format(field)
+        return "{}_avg".format(field), "{}_nondb_avg".format(field)
 
 
 def main():
@@ -380,7 +422,7 @@ def main():
 
     runall = not any([args.towdata, args.categories, args.oldest])
     if args.towdata or runall:
-        towdata.write_towing()
+        towdata.write_towing(filename='towing.csv', date_hash=towdata.date_hash)
     if args.categories or runall:
         towdata.write_pickups()
     if args.oldest or runall:
