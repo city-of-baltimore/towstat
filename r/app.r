@@ -3,6 +3,7 @@ library(lubridate)
 library(dplyr)
 library(googleCharts)
 library(googleVis)
+library(stringr)
 
 # Prepare data from the towing file
 towingdata <- read.csv('towing.csv', header = TRUE)
