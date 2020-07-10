@@ -13,7 +13,7 @@ jobs:
       - name: Lint with flake8
         run : |
           pip install -U flake8 -r requirements.txt
-          flake8 python
+          flake8 --config=.flake8 python
       - name: Look for security issues with Bandit
         run: |
           pip install -U bandit -r requirements.txt
