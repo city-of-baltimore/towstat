@@ -13,7 +13,6 @@ CREATE TABLE [dbo].[towstat_bydate](
 )
 """
 
-import argparse
 import logging
 import re
 
@@ -22,7 +21,7 @@ from collections import defaultdict
 from tqdm import tqdm
 import pyodbc
 
-from namedlist import namedlist
+from .namedlist import namedlist
 
 logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
                     level=logging.INFO,
@@ -125,8 +124,6 @@ class TowingData:
                                 (Release_Date_Time >= Convert(datetime, '{end_date}'))
                                 """).format(end_date=end_date)
 
-        print(restriction)
-
         logging.info("Get_all_vehicles")
         self.cursor.execute(
             """SELECT * FROM
@@ -176,7 +173,7 @@ class TowingData:
         """
         If the date is stored as a pre-1900 date, then its really just a 'null' date
 
-        :param date: (datetime.date) to check for nullness
+        :param check_date: (datetime.date) to check for nullness
         :return: (bool) true if the date is 'null'
         """
         return check_date < date(1900, 12, 31)
@@ -311,7 +308,7 @@ class TowingData:
                     average = (vdays / vnum) if vnum > 0 else 0
                     dirtbike = dirtbike_status == ''
 
-                    print((towyard_date, quantity, average, dirtbike, pickupcode))
+                    logging.debug((towyard_date, quantity, average, dirtbike, pickupcode))
                     data.append((towyard_date, quantity, average, dirtbike, pickupcode))
 
         self.cursor311.executemany("""
@@ -343,36 +340,3 @@ class TowingData:
         """Helper for generating dynamic field names"""
         return "{}_age".format(field), "{}_nondb_age".format(field)
 
-
-def main():
-    """
-    Main function
-    """
-    yesterday = date.today() - timedelta(days=1)
-    parser = argparse.ArgumentParser(description='Circulator ridership aggregator')
-    parser.add_argument('-m', '--month', type=int, default=yesterday.month,
-                        help=('Optional: Month of date we should start searching on (IE: 10 for Oct). Defaults to all '
-                              'days if not specified'))
-    parser.add_argument('-d', '--day', type=int, default=yesterday.day,
-                        help=('Optional: Day of date we should start searching on (IE: 5). Defaults to all days if '
-                              'not specified'))
-    parser.add_argument('-y', '--year', type=int, default=yesterday.year,
-                        help=('Optional: Year of date we should start searching on (IE: 2020). Defaults to all days '
-                              'if not specified'))
-    parser.add_argument('-n', '--numofdays', default=1, type=int,
-                        help='Optional: Number of days to search, including the start date.')
-
-    args = parser.parse_args()
-
-    start_date = None
-    end_date = None
-
-    if args.year and args.month and args.day:
-        start_date = datetime.combine(date(args.year, args.month, args.day), time())
-        end_date = datetime.combine(start_date + timedelta(days=args.numofdays - 1), time(23, 59, 59))
-    towdata = TowingData()
-    towdata.write_towing(start_date=start_date, end_date=end_date)
-
-
-if __name__ == '__main__':
-    main()
