@@ -29,7 +29,7 @@ logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S')
 
 # These are police holds, as opposed to police action, which should be differentiated
-POLICE_HOLD = ['111B', '111M', '111N', '111P', '111S']
+POLICE_HOLD = ['111B', '111M', '111N', '111P', '111S', '200P']
 
 # Vehicle types that are not full size vehicles
 DB_TYPES = ['DB', 'SCOT', 'ATV']
