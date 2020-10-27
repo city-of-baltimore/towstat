@@ -339,4 +339,3 @@ class TowingData:
     def _app_age(field):
         """Helper for generating dynamic field names"""
         return "{}_age".format(field), "{}_nondb_age".format(field)
-
