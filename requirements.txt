@@ -2,3 +2,4 @@ filelock
 pyodbc
 pytest
 tqdm
+namedlist

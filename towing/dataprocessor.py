@@ -8,6 +8,7 @@ CREATE TABLE [dbo].[towstat_bydate](
     [date] [date] NULL,
     [quantity] [int] NULL,
     [average] [real] NULL,
+    [medianage] [real] NULL,
     [dirtbike] [bit] NULL,
     [pickupcode] [varchar](50) NULL
 )
@@ -15,13 +16,13 @@ CREATE TABLE [dbo].[towstat_bydate](
 
 import logging
 import re
-
-from datetime import datetime, time, date, timedelta
 from collections import defaultdict
-from tqdm import tqdm
-import pyodbc
+from datetime import datetime, time, date, timedelta
+from statistics import median, mean
 
-from .namedlist import namedlist
+import pyodbc
+from namedlist import namedlist, FACTORY
+from tqdm import tqdm
 
 logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
                     level=logging.INFO,
@@ -34,7 +35,6 @@ POLICE_HOLD = ['111B', '111M', '111N', '111P', '111S', '200P']
 DB_TYPES = ['DB', 'SCOT', 'ATV']
 
 TOW_CATEGORIES = {
-    0: 'total',
     111: 'police_action',
     1111: 'police_hold',  # not a code; its how we differentiate police_action vs police_hold since we strip subcodes
     112: 'accident',
@@ -51,6 +51,7 @@ class TowingData:
     """
     Manages towing database, data processing, and writing files
     """
+
     def __init__(self):
         conn = pyodbc.connect(r"Driver={SQL Server};"  # pylint:disable=c-extension-no-member
                               r"Server=DOT-FS04-SRV\DOT_FS04;"
@@ -64,11 +65,11 @@ class TowingData:
 
         data_categories = []
 
-        for sublist in [f(x) for x in TOW_CATEGORIES.values() for f in (self._app_num, self._app_age)]:
+        for sublist in [(x, "{}_nondb".format(x)) for x in TOW_CATEGORIES.values()]:
             for item in sublist:
                 data_categories.append(item)
 
-        DataAccumulator = namedlist('DataAccumulator', data_categories, default=0)
+        DataAccumulator = namedlist('DataAccumulator', data_categories, default=FACTORY(list))
 
         # Uses the form of datetime: DataAccumulator
         self.date_dict = defaultdict(lambda: DataAccumulator())  # pylint:disable=unnecessary-lambda
@@ -129,10 +130,11 @@ class TowingData:
             """SELECT * FROM
             (
             SELECT Vehicle_Release.Property_Number, Receiving_Date_Time,
-            convert(datetime,
-            Replace(Release_Date_Time,
-            Convert(datetime, '1899-12-31 00:00:00.000'), GETDATE())) as Release_Date_Time,
-            Pickup_Code, Pickup_Code_Change_Date, Original_Pickup_Code, Property_Type
+                convert(datetime,
+                        Replace(Release_Date_Time, Convert(datetime, '1899-12-31 00:00:00.000'), GETDATE()
+                        )
+                ) as Release_Date_Time,
+                Pickup_Code, Pickup_Code_Change_Date, Original_Pickup_Code, Property_Type
             FROM [Vehicle_Release]
             JOIN Vehicle_Receiving
             ON [Vehicle_Receiving].Property_Number = Vehicle_Release.Property_Number
@@ -144,7 +146,7 @@ class TowingData:
 
     def get_receive_date(self, property_number):
         """
-         Get the receiving date for a specific property number
+        Get the receiving date for a specific property number
 
         :param property_number: property_number of the vehicle to look up
         :return: Datetime.date of the receiving_date
@@ -178,7 +180,8 @@ class TowingData:
         """
         return check_date < date(1900, 12, 31)
 
-    def _process_events(self, receive_date, release_date, code, vehicle_type, days_offset=0):  # pylint:disable=too-many-arguments
+    def _process_events(self, receive_date, release_date, code, vehicle_type,
+                        days_offset=0):  # pylint:disable=too-many-arguments
         """
         Increments the number and age of cars for the specified code between the two dates.
 
@@ -190,7 +193,8 @@ class TowingData:
         moves from one codetype to another and we want to count the existing age of the vehicle
         :return: none
         """
-        logging.debug("_process_events(%s, %s, %s, %s)", receive_date, release_date, code, days_offset)
+        logging.debug("_process_events(%s, %s, %s, %s, %s)",
+                      receive_date, release_date, code, vehicle_type, days_offset)
         if not code:
             # Handle empty codes
             category = "nocode"
@@ -213,26 +217,17 @@ class TowingData:
 
         # For every date, we calculate the number of cars on the lot, and the average age of the cars. Its
         # stored in a hash of date: DataAccumulator
+
         for i in range(0, delta.days + 1):
-            key = receive_date + timedelta(days=i)
+            date_key = receive_date + timedelta(days=i)
 
-            if receive_date and (receive_date <= key <= release_date):
+            if receive_date and (receive_date <= date_key <= release_date):
                 if vehicle_type not in DB_TYPES:
-                    num = "{}_nondb_num".format(category)
-                    setattr(self.date_dict[key], num, getattr(self.date_dict[key], num) + 1)
-                    self.date_dict[key].total_nondb_num += 1
-
-                    age = "{}_nondb_age".format(category)
-                    setattr(self.date_dict[key], age, getattr(self.date_dict[key], age) + i + days_offset + 1)
-                    self.date_dict[key].total_nondb_age += i + days_offset + 1
+                    category_key = "{}_nondb".format(category)
+                    getattr(self.date_dict[date_key], category_key).append(i + days_offset + 1)
                 else:
-                    num = "{}_num".format(category)
-                    setattr(self.date_dict[key], num, getattr(self.date_dict[key], num) + 1)
-                    self.date_dict[key].total_num += 1
-
-                    age = "{}_age".format(category)
-                    setattr(self.date_dict[key], age, getattr(self.date_dict[key], age) + i + days_offset + 1)
-                    self.date_dict[key].total_age += i + days_offset + 1
+                    category_key = "{}".format(category)
+                    getattr(self.date_dict[date_key], category_key, []).append(i + days_offset + 1)
 
     def calculate_vehicle_stats(self, start_date=None, end_date=None):
         """
@@ -298,44 +293,47 @@ class TowingData:
 
             towyard_date = towyard_date.strftime('%Y-%m-%d')
 
+            all_nondb = []
+            all_db = []
             for pickupcode in TOW_CATEGORIES.values():
                 for dirtbike_status in ['', '_nondb']:
-                    quantity = getattr(data_acc, "{}{}_num".format(pickupcode, dirtbike_status))
-
-                    vdays = getattr(data_acc, '{}{}_age'.format(pickupcode, dirtbike_status))
-                    vnum = getattr(data_acc, '{}{}_num'.format(pickupcode, dirtbike_status))
-
-                    average = (vdays / vnum) if vnum > 0 else 0
                     dirtbike = dirtbike_status == ''
+                    working_list = getattr(data_acc, "{}{}".format(pickupcode, dirtbike_status))
 
-                    logging.debug((towyard_date, quantity, average, dirtbike, pickupcode))
-                    data.append((towyard_date, quantity, average, dirtbike, pickupcode))
+                    all_db.extend(working_list) if dirtbike else all_nondb.extend(working_list)
+                    self._calculate_towing_stats(working_list, data, towyard_date, pickupcode, dirtbike)
+
+            # Process the full day totals
+            self._calculate_towing_stats(all_nondb, data, towyard_date, 'total', False)
+            self._calculate_towing_stats(all_db, data, towyard_date, 'total', True)
 
         self.cursor311.executemany("""
-        MERGE towstat_bydate USING (
+        MERGE towstat_bydate1 USING (
         VALUES
-            (?, ?, ?, ?, ?)
-        ) AS vals (date, quantity, average, dirtbike, pickupcode)
-        ON (towstat_bydate.date = vals.date AND
-            towstat_bydate.dirtbike = vals.dirtbike AND
-            towstat_bydate.pickupcode = vals.pickupcode)
+            (?, ?, ?, ?, ?, ?)
+        ) AS vals (date, quantity, average, medianage, dirtbike, pickupcode)
+        ON (towstat_bydate1.date = vals.date AND
+            towstat_bydate1.dirtbike = vals.dirtbike AND
+            towstat_bydate1.pickupcode = vals.pickupcode)
         WHEN MATCHED THEN
             UPDATE SET
             quantity = vals.quantity,
-            average = vals.average
+            average = vals.average, 
+            medianage = vals.medianage
         WHEN NOT MATCHED THEN
-            INSERT (date, quantity, average, dirtbike, pickupcode)
-            VALUES (vals.date, vals.quantity, vals.average, vals.dirtbike, vals.pickupcode)
-        OUTPUT inserted.date, inserted.quantity, inserted.average, inserted.dirtbike, inserted.pickupcode;
+            INSERT (date, quantity, average, medianage, dirtbike, pickupcode)
+            VALUES (vals.date, vals.quantity, vals.average, vals.medianage, vals.dirtbike, vals.pickupcode);
         """, data)
         self.cursor311.commit()
 
     @staticmethod
-    def _app_num(field):
-        """Helper for generating dynamic field names"""
-        return "{}_num".format(field), "{}_nondb_num".format(field)
+    def _calculate_towing_stats(input_list, output_list, towyard_date, pickupcode, dirtbike_status):
+        """
+        Calculates the towyard stats by date, when provided the list of vehicle ages by date
+        """
+        quantity = len(input_list)
+        average_age = mean(input_list) if len(input_list) > 0 else 0
+        median_age = median(input_list) if len(input_list) > 0 else 0
 
-    @staticmethod
-    def _app_age(field):
-        """Helper for generating dynamic field names"""
-        return "{}_age".format(field), "{}_nondb_age".format(field)
+        logging.debug((towyard_date, quantity, average_age, median_age, dirtbike_status, pickupcode))
+        output_list.append((towyard_date, quantity, average_age, median_age, dirtbike_status, pickupcode))
