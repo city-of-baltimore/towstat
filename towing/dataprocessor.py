@@ -180,8 +180,8 @@ class TowingData:
         """
         return check_date < date(1900, 12, 31)
 
-    def _process_events(self, receive_date, release_date, code, vehicle_type,
-                        days_offset=0):  # pylint:disable=too-many-arguments
+    def _process_events(self, receive_date, release_date, code, vehicle_type,  # pylint:disable=too-many-arguments
+                        days_offset=0):
         """
         Increments the number and age of cars for the specified code between the two dates.
 
@@ -300,7 +300,10 @@ class TowingData:
                     dirtbike = dirtbike_status == ''
                     working_list = getattr(data_acc, "{}{}".format(pickupcode, dirtbike_status))
 
-                    all_db.extend(working_list) if dirtbike else all_nondb.extend(working_list)
+                    if dirtbike:
+                        all_db.extend(working_list)
+                    else:
+                        all_nondb.extend(working_list)
                     self._calculate_towing_stats(working_list, data, towyard_date, pickupcode, dirtbike)
 
             # Process the full day totals
