@@ -321,7 +321,7 @@ class TowingData:
         WHEN MATCHED THEN
             UPDATE SET
             quantity = vals.quantity,
-            average = vals.average, 
+            average = vals.average,
             medianage = vals.medianage
         WHEN NOT MATCHED THEN
             INSERT (date, quantity, average, medianage, dirtbike, pickupcode)
