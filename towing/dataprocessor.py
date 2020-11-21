@@ -12,20 +12,27 @@ CREATE TABLE [dbo].[towstat_bydate](
     [dirtbike] [bit] NULL,
     [pickupcode] [varchar](50) NULL
 )
+
+CREATE TABLE [dbo].[towstat_agebydate](
+    [date] [date],
+    [property_id] [varchar](50),
+    [vehicle_age] [int],
+    [pickupcode] [varchar](50) NULL,
+    [dirtbike] [bit] NULL
+)
 """
 
 import logging
 import re
 from collections import defaultdict
-from datetime import datetime, time, date, timedelta
-from statistics import median, mean
+from datetime import datetime, date, timedelta
 
-import pyodbc
-from namedlist import namedlist, FACTORY
 from tqdm import tqdm
+import pyodbc
+from namedlist import namedlist, FACTORY  # pylint:disable=import-error
 
 logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
-                    level=logging.INFO,
+                    level=logging.DEBUG,
                     datefmt='%Y-%m-%d %H:%M:%S')
 
 # These are police holds, as opposed to police action, which should be differentiated
@@ -65,18 +72,18 @@ class TowingData:
 
         data_categories = []
 
-        for sublist in [(x, "{}_nondb".format(x)) for x in TOW_CATEGORIES.values()]:
+        for sublist in [(x, "{}_db".format(x)) for x in TOW_CATEGORIES.values()]:
             for item in sublist:
                 data_categories.append(item)
 
-        DataAccumulator = namedlist('DataAccumulator', data_categories, default=FACTORY(list))
+        DataAccumulator = namedlist('DataAccumulator', data_categories, default=FACTORY(list))  # pylint:disable=invalid-name
 
         # Uses the form of datetime: DataAccumulator
         self.date_dict = defaultdict(lambda: DataAccumulator())  # pylint:disable=unnecessary-lambda
 
-    def get_all_vehicles(self, start_date=None, end_date=None):
+    def get_vehicle_records(self, start_date=None, end_date=None):
         """
-        Get all-time vehicles from the database
+        Get all-time vehicles that were on the lot for the specified dates
 
         :param start_date: First date to search, inclusive
         :type start_date: datetime.date
@@ -110,19 +117,11 @@ class TowingData:
                                 """).format(end_date=end_date, start_date=start_date)
             elif start_date:
                 restriction = ("""WHERE
-                                (Receiving_Date_Time >= Convert(datetime, '{start_date}'))
-                                OR
                                 (Release_Date_Time >= Convert(datetime, '{start_date}'))
-                                OR
-                                (Receiving_Date_Time <= Convert(datetime, '{start_date}'))
                                 """).format(start_date=start_date)
             else:
                 restriction = ("""WHERE
                                 (Receiving_Date_Time <= Convert(datetime, '{end_date}'))
-                                OR
-                                (Release_Date_Time <= Convert(datetime, '{end_date}'))
-                                OR
-                                (Release_Date_Time >= Convert(datetime, '{end_date}'))
                                 """).format(end_date=end_date)
 
         logging.info("Get_all_vehicles")
@@ -144,32 +143,6 @@ class TowingData:
             {restriction}""".format(restriction=restriction))
         return self.cursor.fetchall()
 
-    def get_receive_date(self, property_number):
-        """
-        Get the receiving date for a specific property number
-
-        :param property_number: property_number of the vehicle to look up
-        :return: Datetime.date of the receiving_date
-        """
-        logging.info("get_receive_date")
-        self.cursor.execute("SELECT Receiving_Date_Time FROM Vehicle_Receiving WHERE Property_Number=?",
-                            property_number)
-        res = self.cursor.fetchall()
-        assert len(res) <= 1
-        return res[0][0].date()
-
-    def get_release_date(self, property_number):
-        """
-        Get the release date for a specific property number
-
-        :param property_number: property_number of the vehicle to look up
-        :return: Datetime.date of the release_date
-        """
-        self.cursor.execute("SELECT Release_Date_Time FROM Vehicle_Release WHERE Property_Number=?", property_number)
-        res = self.cursor.fetchall()
-        assert len(res) <= 1
-        return res[0][0].date()
-
     @staticmethod
     def _is_date_zero(check_date):
         """
@@ -181,7 +154,7 @@ class TowingData:
         return check_date < date(1900, 12, 31)
 
     def _process_events(self, receive_date, release_date, code, vehicle_type,  # pylint:disable=too-many-arguments
-                        days_offset=0):
+                        property_num, days_offset=0):
         """
         Increments the number and age of cars for the specified code between the two dates.
 
@@ -189,12 +162,15 @@ class TowingData:
         :param release_date: (Datetime.date) End date (inclusive) when the vehicle was on the lot as that code
         :param code: (str) The tow code for the vehicle
         :param vehicle_type: (str) The vehicle type from the vehicle_information table
+        :param property_num: (str) Property number of the vehicle to process
         :param days_offset: (int) Number of days the vehicle was on the lot before this event. Useful if the vehicle
         moves from one codetype to another and we want to count the existing age of the vehicle
         :return: none
         """
-        logging.debug("_process_events(%s, %s, %s, %s, %s)",
-                      receive_date, release_date, code, vehicle_type, days_offset)
+        logging.debug("_process_events(%s, %s, %s, %s, %s, %s)",
+                      receive_date, release_date, code, vehicle_type, property_num, days_offset)
+        assert days_offset >= 0
+
         if not code:
             # Handle empty codes
             category = "nocode"
@@ -218,125 +194,103 @@ class TowingData:
         # For every date, we calculate the number of cars on the lot, and the average age of the cars. Its
         # stored in a hash of date: DataAccumulator
 
-        for i in range(0, delta.days + 1):
+        for i in range(delta.days + 1):
             date_key = receive_date + timedelta(days=i)
-
             if receive_date and (receive_date <= date_key <= release_date):
-                if vehicle_type not in DB_TYPES:
-                    category_key = "{}_nondb".format(category)
-                    getattr(self.date_dict[date_key], category_key).append(i + days_offset + 1)
-                else:
-                    category_key = "{}".format(category)
-                    getattr(self.date_dict[date_key], category_key, []).append(i + days_offset + 1)
+                category_key = "{}_db".format(category) if vehicle_type in DB_TYPES else "{}".format(category)
+                getattr(self.date_dict[date_key], category_key).append((i + days_offset + 1, property_num))
 
-    def calculate_vehicle_stats(self, start_date=None, end_date=None):
+    def calculate_vehicle_stats(self, start_date: datetime.date = None, end_date: datetime.date = None):
         """
         Calculates the number of vehicles and the average age of the vehicles on a per day basis by pulling each
         row and iterating over the data by day
 
         :param start_date: First date to search, inclusive
-        :type start_date: datetime.date
         :param end_date: Last date to search, inclusive
-        :type end_date: datetime.date
         :return: none
         """
-
-        vehicle_rows = self.get_all_vehicles(start_date, end_date)
+        vehicle_rows = self.get_vehicle_records(start_date, end_date)
         # We have to get everything at once because the database doesn't support multiple concurrent connections, and
         # we have other queries. This pulls every single vehicle from the database
+        # Row has the following data [0: Property_Number, 1: Receiving_Date_Time, 2: Release_Date_Time, 3: Pickup_Code,
+        # 4: Pickup_Code_Change_Date, 5: Original_Pickup_Code, 6: Property_Type]
         for row in tqdm(vehicle_rows):
             # Get receive date
-            receive_date = self.get_receive_date(row[0]) if self._is_date_zero(row[1].date()) else row[1].date()
-            if self._is_date_zero(receive_date):
-                logging.debug("Problematic data (receive) %s", row)
+            if self._is_date_zero(row[1].date()):
+                logging.info("Problematic data with property number %s. Bad start date.", row[1].date())
                 continue
 
-            # Get release date
-            release_date = self.get_release_date(row[0]) if self._is_date_zero(row[2].date()) else row[2].date()
-
             # This means its probably still in the lot, so lets calculate using today as the end date
-            if self._is_date_zero(release_date):
-                release_date = date.today()
+            release_date = date.today() if self._is_date_zero(row[2].date()) else row[2].date()
 
-            logging.debug(row[0])
-            if not self._is_date_zero(row[4].date()):
-                # This means that the pickup code changed, so we should process this as two different date ranges
-                self._process_events(receive_date, row[4].date() - timedelta(days=1), row[5], row[6])
-                initial_age = (row[4].date() - receive_date).days
-                self._process_events(row[4].date(), release_date, row[3], row[6], initial_age)
+            if self._is_date_zero(row[4].date()):
+                self._process_events(row[1].date(), release_date, row[3], row[6], row[0])
             else:
-                self._process_events(receive_date, release_date, row[3], row[6])
+                # This means that the pickup code changed, so we should process this as two different date ranges
+                self._process_events(row[1].date(), row[4].date() - timedelta(days=1), row[5], row[6], row[0])
+                initial_age = (row[4].date() - row[1].date()).days
+                self._process_events(row[4].date(), release_date, row[3], row[6], row[0], initial_age)
 
-    def write_towing(self, start_date=None, end_date=None):
+    def get_vehicle_ages(self, start_date: datetime.date = date(1899, 12, 31), end_date: datetime.date = date.today()):
+        """
+        Calculates the vehicle ages for each date/pickup type/vehicle type
+        :param start_date: Start date of the range of vehicles to pull (inclusive)
+        :param end_date: End date of the range of vehicles to pull (inclusive)
+        :return: List of date (y-m-d), property id, vehicle age (in days), pickup code on that date, and dirtbike bit
+        """
+        logging.info("Write towing: Processing %s to %s", start_date.strftime('%Y-%m-%d'),
+                     end_date.strftime('%Y-%m-%d'))
+
+        self.calculate_vehicle_stats(start_date, end_date)
+
+        days = (end_date - start_date)
+        all_vehicle_ages = []
+        for day in range(days.days + 1):
+            towyard_date = (start_date + timedelta(days=day))
+
+            for pickupcode in TOW_CATEGORIES.values():
+                for dirtbike in [True, False]:
+                    vehicle_list = getattr(self.date_dict[towyard_date],
+                                           "{}{}".format(pickupcode, '_db' if dirtbike else ''))
+
+                    for vehicle_age, prop_id in vehicle_list:
+                        all_vehicle_ages.append((towyard_date.strftime('%Y-%m-%d'), prop_id, vehicle_age, pickupcode,
+                                                 dirtbike))
+        return all_vehicle_ages
+
+    def write_towing(self, start_date: datetime.date = date(1899, 12, 31), end_date: datetime.date = date.today(),
+                     split=False):
         """
         Writes the date that the vehicle entered and left the lot (if applicable). Also generates the quantity and
         average age of the cars at that time
 
+        :param start_date: First date (inclusive) to write to the database
+        :param end_date: Last date (inclusive) to write to the database
+        :param split: Process by date instead of the whole date range at once. This is good for very large date ranges.
+        Default false
         :return: none
         """
-        if not start_date:
-            start_date = date(1899, 12, 31)
+        if split:
+            days = end_date - start_date
+            for day in range(days.days):
+                tow_date = start_date + timedelta(days=day)
+                self.write_towing(tow_date, tow_date)
 
-        if not end_date:
-            end_date = datetime.combine(date.today(), time(23, 59, 59))
-
-        logging.info("write_towing")
-        if len(self.date_dict) == 0:
-            self.calculate_vehicle_stats(start_date, end_date)
-
-        data = []
-
-        for towyard_date, data_acc in sorted(self.date_dict.items()):
-            towyard_date = datetime.combine(towyard_date, time())
-            if not start_date <= towyard_date <= end_date:
-                continue
-
-            towyard_date = towyard_date.strftime('%Y-%m-%d')
-
-            all_nondb = []
-            all_db = []
-            for pickupcode in TOW_CATEGORIES.values():
-                for dirtbike_status in ['', '_nondb']:
-                    dirtbike = dirtbike_status == ''
-                    working_list = getattr(data_acc, "{}{}".format(pickupcode, dirtbike_status))
-
-                    if dirtbike:
-                        all_db.extend(working_list)
-                    else:
-                        all_nondb.extend(working_list)
-                    self._calculate_towing_stats(working_list, data, towyard_date, pickupcode, dirtbike)
-
-            # Process the full day totals
-            self._calculate_towing_stats(all_nondb, data, towyard_date, 'total', False)
-            self._calculate_towing_stats(all_db, data, towyard_date, 'total', True)
-
+        all_vehicle_ages = self.get_vehicle_ages(tow_date, tow_date)
         self.cursor311.executemany("""
-        MERGE towstat_bydate1 USING (
-        VALUES
-            (?, ?, ?, ?, ?, ?)
-        ) AS vals (date, quantity, average, medianage, dirtbike, pickupcode)
-        ON (towstat_bydate1.date = vals.date AND
-            towstat_bydate1.dirtbike = vals.dirtbike AND
-            towstat_bydate1.pickupcode = vals.pickupcode)
-        WHEN MATCHED THEN
-            UPDATE SET
-            quantity = vals.quantity,
-            average = vals.average,
-            medianage = vals.medianage
-        WHEN NOT MATCHED THEN
-            INSERT (date, quantity, average, medianage, dirtbike, pickupcode)
-            VALUES (vals.date, vals.quantity, vals.average, vals.medianage, vals.dirtbike, vals.pickupcode);
-        """, data)
+            MERGE [towstat_agebydate] USING (
+            VALUES
+                (?, ?, ?, ?, ?)
+            ) AS vals (date, property_id, vehicle_age, pickupcode, dirtbike)
+            ON (towstat_agebydate.date = vals.date AND
+                towstat_agebydate.property_id = vals.property_id)
+            WHEN MATCHED THEN
+                UPDATE SET
+                vehicle_age = vals.vehicle_age,
+                pickupcode = vals.pickupcode,
+                dirtbike = vals.dirtbike
+            WHEN NOT MATCHED THEN
+                INSERT (date, property_id, vehicle_age, pickupcode, dirtbike)
+                VALUES (vals.date, vals.property_id, vals.vehicle_age, vals.pickupcode, vals.dirtbike);
+        """, all_vehicle_ages)
         self.cursor311.commit()
-
-    @staticmethod
-    def _calculate_towing_stats(input_list, output_list, towyard_date, pickupcode, dirtbike_status):
-        """
-        Calculates the towyard stats by date, when provided the list of vehicle ages by date
-        """
-        quantity = len(input_list)
-        average_age = mean(input_list) if len(input_list) > 0 else 0
-        median_age = median(input_list) if len(input_list) > 0 else 0
-
-        logging.debug((towyard_date, quantity, average_age, median_age, dirtbike_status, pickupcode))
-        output_list.append((towyard_date, quantity, average_age, median_age, dirtbike_status, pickupcode))

@@ -1,7 +1,10 @@
+"""Towstat driver script"""
 import argparse
-from datetime import datetime, time, date, timedelta
+from datetime import date, timedelta
 
-from towing import TowingData
+from towing.dataprocessor import TowingData
+
+# pylint:disable=invalid-name
 
 yesterday = date.today() - timedelta(days=1)
 parser = argparse.ArgumentParser(description='Tow data parser')
@@ -23,8 +26,8 @@ start_date = None
 end_date = None
 
 if args.year and args.month and args.day:
-    start_date = datetime.combine(date(args.year, args.month, args.day), time())
-    end_date = datetime.combine(start_date + timedelta(days=args.numofdays - 1), time(23, 59, 59))
+    start_date = date(args.year, args.month, args.day)
+    end_date = start_date + timedelta(days=args.numofdays - 1)
 
 towdata = TowingData()
 towdata.write_towing(start_date=start_date, end_date=end_date)
