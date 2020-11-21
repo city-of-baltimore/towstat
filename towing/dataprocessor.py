@@ -276,7 +276,7 @@ class TowingData:
                 tow_date = start_date + timedelta(days=day)
                 self.write_towing(tow_date, tow_date)
 
-        all_vehicle_ages = self.get_vehicle_ages(tow_date, tow_date)
+        all_vehicle_ages = self.get_vehicle_ages(start_date, end_date)
         self.cursor311.executemany("""
             MERGE [towstat_agebydate] USING (
             VALUES
