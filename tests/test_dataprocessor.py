@@ -1,8 +1,8 @@
-""" test suite for towing.dataprocessor """
+""" test suite for towstat.dataprocessor """
 from datetime import datetime, timedelta, date
 import pytest
 
-from .. import towing  # pylint:disable=relative-beyond-top-level
+from towstat import dataprocessor
 
 
 @pytest.fixture(name='towingdata')
@@ -10,43 +10,7 @@ def fixture_towingdata():
     """
     Setup for each test
     """
-    return towing.dataprocessor.TowingData()
-
-
-def test_get_all_vehicles(towingdata):
-    """ tests get_all_vehicles """
-    # default dates
-    res = towingdata.get_vehicle_records()
-    assert len(res) > 425000, "Not enough rows in default date test"
-    assert _verify_vehicle_rows(res[0])
-    assert _verify_vehicle_rows(res[-1])
-
-    # use set dates on both sides
-    start_date = datetime(2020, 1, 1)
-    end_date = datetime(2020, 1, 2)
-    res = towingdata.get_vehicle_records(start_date, end_date)
-    invalid_rows = [x for x in res
-                    if not ((start_date <= x[2] <= end_date) or
-                            (start_date <= x[1] <= end_date) or
-                            (x[1] <= start_date and end_date <= x[2]))]
-    assert not invalid_rows, "Got invalid rows {}".format(invalid_rows)
-    assert 3400 > len(res) > 3300, "Unexpected number of rows: {}".format(len(res))
-    assert _verify_vehicle_rows(res[0])
-    assert _verify_vehicle_rows(res[-1])
-
-    # use default end date
-    start_date = datetime.today() - timedelta(days=2)
-    res = towingdata.get_vehicle_records(start_date)
-    assert len(res) < 8000, "Not enough rows in default date test"
-    assert _verify_vehicle_rows(res[0])
-    assert _verify_vehicle_rows(res[-1])
-
-    # use default start date
-    end_date = datetime(2002, 1, 2)
-    res = towingdata.get_vehicle_records(end_date=end_date)
-    assert len(res) < 8000, "Not enough rows in default date test"
-    assert _verify_vehicle_rows(res[0])
-    assert _verify_vehicle_rows(res[-1])
+    return dataprocessor.TowingData()
 
 
 def _verify_vehicle_rows(row):
@@ -61,6 +25,49 @@ def _verify_vehicle_rows(row):
     return True
 
 
+def test_get_all_vehicles(towingdata):
+    """ tests get_all_vehicles """
+    # default dates
+    """
+    res = towingdata.get_vehicle_records()
+    assert len(res) > 425000, "Not enough rows in default date test"
+    assert _verify_vehicle_rows(res[0])
+    assert _verify_vehicle_rows(res[-1])
+
+    # use set dates on both sides
+    start_date = date(2020, 1, 1)
+    end_date = date(2020, 1, 2)
+    res = towingdata.get_vehicle_records(start_date, end_date)
+    invalid_rows = [x for x in res
+                    if not ((start_date <= x[2] <= end_date) or
+                            (start_date <= x[1] <= end_date) or
+                            (x[1] <= start_date and end_date <= x[2]))]
+    assert not invalid_rows, "Got invalid rows {}".format(invalid_rows)
+    assert 3400 > len(res) > 3300, "Unexpected number of rows: {}".format(len(res))
+    assert _verify_vehicle_rows(res[0])
+    assert _verify_vehicle_rows(res[-1])
+
+    # use default end date
+    start_date = date.today() - timedelta(days=2)
+    res = towingdata.get_vehicle_records(start_date)
+    assert len(res) < 8000, "Not enough rows in default date test"
+    assert _verify_vehicle_rows(res[0])
+    assert _verify_vehicle_rows(res[-1])
+
+    # use default start date
+    end_date = date(2002, 1, 2)
+    res = towingdata.get_vehicle_records(end_date=end_date)
+    assert len(res) < 8000, "Not enough rows in default date test"
+    assert _verify_vehicle_rows(res[0])
+    assert _verify_vehicle_rows(res[-1])
+    """
+    # check that a one day old vehicle shows up as one day old
+    today = datetime.today()
+    towingdata.calculate_vehicle_stats(vehicle_rows=[('P1', today, today, '111', datetime(1899, 12, 31), '111',
+                                                      'ATV')])
+    assert towingdata.date_dict[today.date()].police_action_db[0][0] == 1
+
+
 def test_is_date_zero(towingdata):
     """ tests _is_date_zero """
     assert towingdata._is_date_zero(date(1899, 12, 31))  # pylint:disable=protected-access
@@ -69,8 +76,8 @@ def test_is_date_zero(towingdata):
 
 def test_calculate_vehicle_stats(towingdata):
     """ tests calculate_vehicle_stats """
-    start_date = datetime(2020, 1, 1)
-    end_date = datetime(2020, 1, 2)
+    start_date = date(2020, 1, 1)
+    end_date = date(2020, 1, 2)
 
     towingdata.calculate_vehicle_stats(start_date, end_date)
     towingdata.date_dict.keys()

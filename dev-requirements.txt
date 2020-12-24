@@ -1,0 +1,9 @@
+pip
+pylint
+flake8
+bandit
+mypy
+wheel
+tox
+coverage
+pytest-cov
