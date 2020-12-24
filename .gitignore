@@ -180,3 +180,6 @@ dmypy.json
 .pyre/
 
 .idea/
+
+# virtual environments
+venv-*/
