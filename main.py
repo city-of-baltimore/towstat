@@ -2,7 +2,7 @@
 import argparse
 from datetime import date, timedelta
 
-from towing.dataprocessor import TowingData
+from towstat.dataprocessor import TowingData
 
 # pylint:disable=invalid-name
 
@@ -19,15 +19,17 @@ parser.add_argument('-y', '--year', type=int, default=yesterday.year,
                           'if not specified'))
 parser.add_argument('-n', '--numofdays', default=1, type=int,
                     help='Optional: Number of days to search, including the start date. Defaults to 1 day.')
+parser.add_argument('-f', '--force', action='store_true',
+                    help='Regenerate the data for the date range. By default, it skips dates with existing data.')
 
 args = parser.parse_args()
-
-start_date = None
-end_date = None
 
 if args.year and args.month and args.day:
     start_date = date(args.year, args.month, args.day)
     end_date = start_date + timedelta(days=args.numofdays - 1)
+else:
+    start_date = date(2000, 1, 1)
+    end_date = date.today() - timedelta(days=1)
 
 towdata = TowingData()
-towdata.write_towing(start_date=start_date, end_date=end_date)
+towdata.write_towing(start_date=start_date, end_date=end_date, force=args.force)
