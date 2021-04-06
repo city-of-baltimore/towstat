@@ -69,10 +69,10 @@ class TowingData:
 
     def __init__(self, towdb_conn_str: Optional[str] = None, db_conn_str: Optional[str] = None):
         if towdb_conn_str is None:
-            towdb_conn_str = r'Driver={SQL Server};Server=DOT-FS04-SRV\DOT_FS04;Database=IVIC;Trusted_Connection=yes;'
+            towdb_conn_str = r'Driver={ODBC Driver 17 for SQL Server};Server=DOT-FS04-SRV\DOT_FS04;Database=IVIC;Trusted_Connection=yes;'
 
         if db_conn_str is None:
-            db_conn_str = 'Driver={SQL Server};Server=balt-sql311-prd;Database=DOT_DATA;Trusted_Connection=yes;'
+            db_conn_str = 'Driver={ODBC Driver 17 for SQL Server};Server=balt-sql311-prd;Database=DOT_DATA;Trusted_Connection=yes;'
 
         conn = pyodbc.connect(towdb_conn_str)  # pylint:disable=c-extension-no-member
         self.cursor = conn.cursor()
@@ -275,8 +275,8 @@ class TowingData:
             self.cursor311.execute("""
                 SELECT DISTINCT([date])
                 FROM [DOT_DATA].[dbo].[towstat_agebydate]
-                WHERE date > convert(date, %s) and date < convert(date, %s)
-            """, (start_date, end_date))
+                WHERE date > convert(date, ?) and date < convert(date, ?)
+            """, '2020-01-01', '2020-01-02')
             actual_dates = {datetime.strptime(i[0], '%Y-%m-%d').date() for i in self.cursor311.fetchall()}
         else:
             actual_dates = set()
