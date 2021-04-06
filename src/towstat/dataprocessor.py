@@ -69,10 +69,12 @@ class TowingData:
 
     def __init__(self, towdb_conn_str: Optional[str] = None, db_conn_str: Optional[str] = None):
         if towdb_conn_str is None:
-            towdb_conn_str = r'Driver={ODBC Driver 17 for SQL Server};Server=DOT-FS04-SRV\DOT_FS04;Database=IVIC;Trusted_Connection=yes;'
+            towdb_conn_str = r'Driver={ODBC Driver 17 for SQL Server};Server=DOT-FS04-SRV\DOT_FS04;Database=IVIC;' \
+                             r'Trusted_Connection=yes;'
 
         if db_conn_str is None:
-            db_conn_str = 'Driver={ODBC Driver 17 for SQL Server};Server=balt-sql311-prd;Database=DOT_DATA;Trusted_Connection=yes;'
+            db_conn_str = 'Driver={ODBC Driver 17 for SQL Server};Server=balt-sql311-prd;Database=DOT_DATA;' \
+                          'Trusted_Connection=yes;'
 
         conn = pyodbc.connect(towdb_conn_str)  # pylint:disable=c-extension-no-member
         self.cursor = conn.cursor()
