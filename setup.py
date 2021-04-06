@@ -11,8 +11,8 @@ setup(
     python_requires='>=3.0',
     package_dir={'': 'src'},
     install_requires=[
-        'tqdm',
-        'pyodbc',
-        'namedlist',
+        'tqdm~=4.60.0',
+        'pyodbc~=4.0.30',
+        'loguru~=0.5.3',
     ]
 )

@@ -270,7 +270,7 @@ class TowingData:
         :param force: Regenerate the data for the date range. By default, it skips dates with existing data.
         :return: none
         """
-        if force:
+        if not force:
             # get populated dates
             self.cursor311.execute("""
                 SELECT DISTINCT([date])
