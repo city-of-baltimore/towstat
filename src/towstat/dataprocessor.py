@@ -25,7 +25,7 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import Field, field, make_dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm  # type: ignore
