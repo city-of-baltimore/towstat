@@ -1,16 +1,5 @@
 """ test suite for towstat.dataprocessor """
 from datetime import datetime, timedelta, date
-import pytest
-
-from towstat import dataprocessor
-
-
-@pytest.fixture(name='towingdata')
-def fixture_towingdata():
-    """
-    Setup for each test
-    """
-    return dataprocessor.TowingData()
 
 
 def _verify_vehicle_rows(row):

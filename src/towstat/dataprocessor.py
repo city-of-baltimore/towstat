@@ -24,12 +24,12 @@ CREATE TABLE [dbo].[towstat_agebydate](
 import logging
 import re
 from collections import defaultdict
+from dataclasses import Field, field, make_dataclass
 from datetime import date, timedelta
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm  # type: ignore
 import pyodbc  # type: ignore
-from namedlist import namedlist, FACTORY  # type: ignore
 
 logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
                     level=logging.DEBUG,
@@ -53,31 +53,34 @@ TOW_CATEGORIES = {
     1000: 'nocode'
 }
 
+data_categories: List[Tuple[str, type, Field]] = []
+for sublist in [(x, "{}_db".format(x)) for x in TOW_CATEGORIES.values()]:
+    for item in sublist:
+        data_categories.append((item, list, field(default_factory=list)))  # type: ignore  # noqa
+
+DataAccumulator = make_dataclass('DataAccumulator', data_categories)
+
 
 class TowingData:
     """Manages towing database, data processing, and writing files"""
 
-    def __init__(self):
-        conn = pyodbc.connect(r"Driver={SQL Server};"  # pylint:disable=c-extension-no-member
-                              r"Server=DOT-FS04-SRV\DOT_FS04;"
-                              r"Database=IVIC;"
-                              r"Trusted_Connection=yes;")
+    def __init__(self, towdb_conn_str: Optional[str] = None, db_conn_str: Optional[str] = None):
+        if towdb_conn_str is None:
+            towdb_conn_str = r'Driver={ODBC Driver 17 for SQL Server};Server=DOT-FS04-SRV\DOT_FS04;Database=IVIC;' \
+                             r'Trusted_Connection=yes;'
 
+        if db_conn_str is None:
+            db_conn_str = 'Driver={ODBC Driver 17 for SQL Server};Server=balt-sql311-prd;Database=DOT_DATA;' \
+                          'Trusted_Connection=yes;'
+
+        conn = pyodbc.connect(towdb_conn_str)  # pylint:disable=c-extension-no-member
         self.cursor = conn.cursor()
 
-        conn311 = pyodbc.connect('Driver={SQL Server};Server=balt-sql311-prd;Database=DOT_DATA;Trusted_Connection=yes;')
+        conn311 = pyodbc.connect(db_conn_str)
         self.cursor311 = conn311.cursor()
 
-        data_categories: List[str] = []
-
-        for sublist in [(x, "{}_db".format(x)) for x in TOW_CATEGORIES.values()]:
-            for item in sublist:
-                data_categories.append(item)
-
-        DataAccumulator = namedlist('DataAccumulator', data_categories, default=FACTORY(list))  # pylint:disable=invalid-name
-
         # Uses the form of datetime: DataAccumulator
-        self.date_dict: Dict[Tuple[int, str]] = defaultdict(lambda: DataAccumulator())  # pylint:disable=unnecessary-lambda
+        self.date_dict: Dict[date, Tuple[int, str]] = defaultdict(lambda: DataAccumulator())  # pylint:disable=unnecessary-lambda
 
     def get_vehicle_records(self, start_date: date = None, end_date: date = None):
         """
@@ -237,8 +240,7 @@ class TowingData:
         :param end_date: End date of the range of vehicles to pull (inclusive)
         :return: List of date (y-m-d), property id, vehicle age (in days), pickup code on that date, and dirtbike bit
         """
-        logging.info("Write towing: Processing %s to %s", start_date.strftime('%Y-%m-%d'),
-                     end_date.strftime('%Y-%m-%d'))
+        logging.info("Processing %s to %s", start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
 
         self.calculate_vehicle_stats(start_date, end_date)
 
@@ -257,41 +259,47 @@ class TowingData:
                                                  dirtbike))
         return all_vehicle_ages
 
-    def write_towing(self, start_date: date = date(1899, 12, 31), end_date: date = date.today(),
-                     split=False):
+    def write_towing(self, start_date: date = date(1899, 12, 31), end_date: date = date.today(), force: bool = False):
         """
         Writes the date that the vehicle entered and left the lot (if applicable). Also generates the quantity and
         average age of the cars at that time
 
         :param start_date: First date (inclusive) to write to the database
         :param end_date: Last date (inclusive) to write to the database
-        :param split: Process by date instead of the whole date range at once. This is good for very large date ranges.
-        Default false
+        :param force: Regenerate the data for the date range. By default, it skips dates with existing data.
         :return: none
         """
-        if split:
-            days = end_date - start_date
-            for day in range(days.days):
-                tow_date = start_date + timedelta(days=day)
-                self.write_towing(tow_date, tow_date)
+        if not force:
+            # get populated dates
+            self.cursor311.execute("""
+                SELECT DISTINCT([date])
+                FROM [DOT_DATA].[dbo].[towstat_agebydate]
+                WHERE date > convert(date, ?) and date < convert(date, ?)
+            """, start_date, end_date)
+            actual_dates = {i[0] for i in self.cursor311.fetchall()}
+        else:
+            actual_dates = set()
 
-        all_vehicle_ages = self.get_vehicle_ages(start_date, end_date)
-        if not all_vehicle_ages:
-            return
-        self.cursor311.executemany("""
-            MERGE [towstat_agebydate] USING (
-            VALUES
-                (?, ?, ?, ?, ?)
-            ) AS vals (date, property_id, vehicle_age, pickupcode, dirtbike)
-            ON (towstat_agebydate.date = vals.date AND
-                towstat_agebydate.property_id = vals.property_id)
-            WHEN MATCHED THEN
-                UPDATE SET
-                vehicle_age = vals.vehicle_age,
-                pickupcode = vals.pickupcode,
-                dirtbike = vals.dirtbike
-            WHEN NOT MATCHED THEN
-                INSERT (date, property_id, vehicle_age, pickupcode, dirtbike)
-                VALUES (vals.date, vals.property_id, vals.vehicle_age, vals.pickupcode, vals.dirtbike);
-        """, all_vehicle_ages)
-        self.cursor311.commit()
+        expected_dates = {start_date + timedelta(days=i) for i in range((end_date-start_date).days + 1)}
+
+        for proc_date in expected_dates - actual_dates:
+            all_vehicle_ages = self.get_vehicle_ages(proc_date, proc_date)
+            if not all_vehicle_ages:
+                return
+            self.cursor311.executemany("""
+                MERGE [towstat_agebydate] USING (
+                VALUES
+                    (?, ?, ?, ?, ?)
+                ) AS vals (date, property_id, vehicle_age, pickupcode, dirtbike)
+                ON (towstat_agebydate.date = vals.date AND
+                    towstat_agebydate.property_id = vals.property_id)
+                WHEN MATCHED THEN
+                    UPDATE SET
+                    vehicle_age = vals.vehicle_age,
+                    pickupcode = vals.pickupcode,
+                    dirtbike = vals.dirtbike
+                WHEN NOT MATCHED THEN
+                    INSERT (date, property_id, vehicle_age, pickupcode, dirtbike)
+                    VALUES (vals.date, vals.property_id, vals.vehicle_age, vals.pickupcode, vals.dirtbike);
+            """, all_vehicle_ages)
+            self.cursor311.commit()
