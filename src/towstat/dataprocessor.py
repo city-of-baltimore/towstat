@@ -279,7 +279,7 @@ class TowingData:
                 FROM [DOT_DATA].[dbo].[towstat_agebydate]
                 WHERE date > convert(date, ?) and date < convert(date, ?)
             """, start_date, end_date)
-            actual_dates = {datetime.strptime(i[0], '%Y-%m-%d').date() for i in self.cursor311.fetchall()}
+            actual_dates = {i[0] for i in self.cursor311.fetchall()}
         else:
             actual_dates = set()
 
