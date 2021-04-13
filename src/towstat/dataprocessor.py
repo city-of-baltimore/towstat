@@ -278,7 +278,7 @@ class TowingData:
                 SELECT DISTINCT([date])
                 FROM [DOT_DATA].[dbo].[towstat_agebydate]
                 WHERE date > convert(date, ?) and date < convert(date, ?)
-            """, '2020-01-01', '2020-01-02')
+            """, start_date, end_date)
             actual_dates = {datetime.strptime(i[0], '%Y-%m-%d').date() for i in self.cursor311.fetchall()}
         else:
             actual_dates = set()
