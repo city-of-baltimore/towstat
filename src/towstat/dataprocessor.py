@@ -61,9 +61,6 @@ for sublist in [(x, "{}_db".format(x)) for x in TOW_CATEGORIES.values()]:
 DataAccumulator = make_dataclass('DataAccumulator', data_categories)
 
 
-# DataAccumulator = namedlist('DataAccumulator', data_categories, default=FACTORY(list))  # pylint:disable=invalid-name
-
-
 class TowingData:
     """Manages towing database, data processing, and writing files"""
 
