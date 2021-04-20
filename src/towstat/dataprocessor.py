@@ -32,13 +32,6 @@ from loguru import logger
 from tqdm import tqdm  # type: ignore
 import pyodbc  # type: ignore
 
-handlers = [
-    {'sink': sys.stdout, 'format': '{time} - {message}', 'colorize': True, 'backtrace': True, 'diagnose': True},
-    {'sink': os.path.join('logs', 'file-{time}.log'), 'colorize': True, 'serialize': True, 'backtrace': True,
-     'diagnose': True, 'rotation': '1 week', 'retention': '3 months', 'compression': 'zip'},
-]
-
-logger.configure(handlers=handlers)
 
 # These are police holds, as opposed to police action, which should be differentiated
 POLICE_HOLD = ['111B', '111M', '111N', '111P', '111S', '200P']
