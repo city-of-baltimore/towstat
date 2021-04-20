@@ -20,9 +20,7 @@ CREATE TABLE [dbo].[towstat_agebydate](
     [dirtbike] [bit] NULL
 )
 """
-import os
 import re
-import sys
 from collections import defaultdict
 from dataclasses import Field, field, make_dataclass
 from datetime import date, timedelta
