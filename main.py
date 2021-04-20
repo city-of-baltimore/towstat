@@ -1,9 +1,22 @@
 """Towstat driver script"""
 import argparse
+import os
+import sys
 from datetime import date, timedelta
 from loguru import logger
 
 from towstat.dataprocessor import TowingData
+
+config = {
+    'handlers': [
+        {'sink': sys.stdout, 'format': '{time} - {message}', 'colorize': True, 'backtrace': True, 'diagnose': True},
+        {'sink': os.path.join('logs', 'file-{time}.log'), 'colorize': True, 'serialize': True, 'backtrace': True, 'diagnose': True,
+         'rotation': '1 week', 'retention': '3 months', 'compression': 'zip'},
+    ],
+    'extra': {'user': 'someone'}
+}
+
+logger.configure(**config)
 
 yesterday = date.today() - timedelta(days=1)
 parser = argparse.ArgumentParser(description='Tow data parser')
