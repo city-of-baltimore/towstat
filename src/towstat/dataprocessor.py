@@ -282,7 +282,11 @@ class TowingData:
 
         expected_dates = {start_date + timedelta(days=i) for i in range((end_date-start_date).days + 1)}
 
-        for proc_date in expected_dates - actual_dates:
+        dates_to_proc_set = expected_dates - actual_dates
+        dates_to_proc_list = list(dates_to_proc_set)
+        dates_to_proc_list.sort(reverse=True)
+
+        for proc_date in dates_to_proc_list:
             all_vehicle_ages = self.get_vehicle_ages(proc_date, proc_date)
             if not all_vehicle_ages:
                 return
