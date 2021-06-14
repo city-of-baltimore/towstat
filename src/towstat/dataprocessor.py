@@ -20,20 +20,16 @@ CREATE TABLE [dbo].[towstat_agebydate](
     [dirtbike] [bit] NULL
 )
 """
-
-import logging
 import re
 from collections import defaultdict
 from dataclasses import Field, field, make_dataclass
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Tuple
 
+from loguru import logger
 from tqdm import tqdm  # type: ignore
 import pyodbc  # type: ignore
 
-logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
-                    level=logging.DEBUG,
-                    datefmt='%Y-%m-%d %H:%M:%S')
 
 # These are police holds, as opposed to police action, which should be differentiated
 POLICE_HOLD = ['111B', '111M', '111N', '111P', '111S', '200P']
@@ -122,7 +118,7 @@ class TowingData:
                             (Receiving_Date_Time <= Convert(datetime, '{end_date}'))
                             """).format(end_date=end_date.strftime("%Y-%m-%d"))
 
-        logging.info("Get_all_vehicles")
+        logger.info("Get_all_vehicles")
         self.cursor.execute(
             """SELECT * FROM
             (
@@ -165,8 +161,8 @@ class TowingData:
         moves from one codetype to another and we want to count the existing age of the vehicle
         :return: none
         """
-        logging.debug("_process_events(%s, %s, %s, %s, %s, %s)",
-                      receive_date, release_date, code, vehicle_type, property_num, days_offset)
+        logger.debug("_process_events({}, {}, {}, {}, {}, {})",
+                     receive_date, release_date, code, vehicle_type, property_num, days_offset)
         assert days_offset >= 0
 
         if not code:
@@ -218,7 +214,7 @@ class TowingData:
         for row in tqdm(vehicle_rows):
             # Get receive date
             if self._is_date_zero(row[1].date()):
-                logging.info("Problematic data with property number %s. Bad start date.", row[1].date())
+                logger.info("Problematic data with property number {}. Bad start date.", row[1].date())
                 continue
 
             # This means its probably still in the lot, so lets calculate using today as the end date
@@ -240,7 +236,7 @@ class TowingData:
         :param end_date: End date of the range of vehicles to pull (inclusive)
         :return: List of date (y-m-d), property id, vehicle age (in days), pickup code on that date, and dirtbike bit
         """
-        logging.info("Processing %s to %s", start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+        logger.info("Processing {} to {}", start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
 
         self.calculate_vehicle_stats(start_date, end_date)
 
